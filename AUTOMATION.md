@@ -35,3 +35,15 @@ sudo apt update
 sudo apt install jenkins
 ```
 status: success
+
+# Jenkins Plugins
+Goto Manage Jenkins →Plugins → Available Plugins →
+Install below plugins:
+1. Eclipse Temurin Installer
+2. SonarQube Scanner (Install without restart)
+3. NodeJs Plugin (Install Without restart)
+4. Email Extension Plugin
+
+# Configure Java and Nodejs in Global Tool Configuration
+Goto Manage Jenkins → Tools → Install JDK(17) and NodeJs(16)→ Click on Apply and Save
+
