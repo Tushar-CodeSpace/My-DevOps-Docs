@@ -43,6 +43,19 @@ services:
     networks:
       - devSecOps_network
 
+  # Jenkins
+  jenkins:
+    image: jenkins/jenkins:latest-jdk21
+    container_name: jenkins-server
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /data/docker/jenkins:/var/jenkins_home
+    networks:
+      - devSecOps_network
+
 #=============================================#
 # Volumes
 #=============================================#
