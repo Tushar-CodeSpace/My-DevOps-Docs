@@ -56,6 +56,19 @@ services:
     networks:
       - devSecOps_network
 
+  # Trivy Security Scanner
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: trivy-scanner
+    profiles:
+      - tools
+    entrypoint: ["trivy"]
+    volumes:
+      - ./:/workspace:ro
+      - /data/docker/trivy/cache:/root/.cache/
+    networks:
+      - devSecOps_network
+
 #=============================================#
 # Volumes
 #=============================================#

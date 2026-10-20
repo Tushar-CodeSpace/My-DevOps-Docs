@@ -1,42 +1,63 @@
-# SonarQube with PostgreSQL — Docker Compose
+# DevSecOps Local Stack: Jenkins, SonarQube, PostgreSQL, and Trivy
 
-A persistent, containerized SonarQube Community Build setup backed by PostgreSQL. The configuration stores application and database data under `/data/docker/sonarqube` to keep persistent data off the root filesystem.
+A local DevSecOps environment managed with Docker Compose. Jenkins runs CI/CD pipelines, SonarQube analyzes code quality, PostgreSQL stores SonarQube data, and Trivy performs vulnerability and configuration scans.
 
-## Architecture
+## Services
 
-- **SonarQube:** Web UI and code analysis server.
-- **PostgreSQL 17:** Persistent database for SonarQube.
-- **Docker Compose:** Runs and manages both services.
-- **Persistent storage:** Host bind mounts under `/data/docker/sonarqube`.
-- **Network:** Dedicated Docker bridge network named `devSecOps_network`.
+| Service | Container | Local URL / access | Purpose |
+|---|---|---|---|
+| Jenkins | `jenkins-server` | http://localhost:8080 | CI/CD automation |
+| SonarQube | `sonarqube-server` | http://localhost:9000 | Static analysis and quality gates |
+| PostgreSQL | `sonarqube-db` | Docker network only | SonarQube database |
+| Trivy | On-demand container | No web UI | Vulnerability, secret, and misconfiguration scanning |
+
+The Jenkins and SonarQube web ports are bound to `127.0.0.1` and are not exposed to other machines by default. Jenkins and SonarQube share the `devSecOps_network` Docker network. From Jenkins, the SonarQube URL is:
 
 ```text
-Browser
-   |
-   | http://localhost:9000
-   v
-SonarQube container (sonarqube-server)
-   |
-   | JDBC: jdbc:postgresql://db:5432/sonar
-   v
-PostgreSQL container (sonarqube-db)
+http://sonarqube-server:9000
+```
 
-Persistent host data:
-  /data/docker/sonarqube/sonarqube_data
-  /data/docker/sonarqube/extensions
-  /data/docker/sonarqube/logs
-  /data/docker/sonarqube/temp
-  /data/docker/sonarqube/postgres
+Trivy is an on-demand Compose profile service, so it does not run continuously.
+
+## Storage layout
+
+Persistent data is intended to be stored on the larger `/data` partition:
+
+```text
+/data/docker/
+├── jenkins/
+└── sonarqube/
+    ├── postgres/
+    ├── sonarqube_data/
+    ├── extensions/
+    ├── logs/
+    └── temp/
+
+/data/docker/trivy/cache/
+```
+
+Verify actual mounts with `docker inspect` before assuming data is being written to these paths.
+
+## Repository layout
+
+```text
+My-DevOps-Docs/
+├── docker-compose.yml
+├── .env                  # Local secret; never commit
+├── .gitignore
+├── README.md
+├── AUTOMATION.md
+└── SECURITY.md
 ```
 
 ## Prerequisites
 
-- Linux host with Docker Engine installed.
-- Docker Compose v2 (`docker compose`).
-- Sufficient memory and disk space for SonarQube and PostgreSQL.
-- A writable `/data` filesystem with enough free space.
+- Linux host with Docker Engine and Docker Compose v2.
+- Sufficient RAM for Jenkins, SonarQube, and PostgreSQL running together.
+- Free disk space on `/data`.
+- A strong, unique database password.
 
-SonarQube uses Elasticsearch. Configure the required Linux kernel setting on the host:
+SonarQube uses Elasticsearch. Configure the host kernel settings:
 
 ```bash
 sudo tee /etc/sysctl.d/99-sonarqube.conf <<'EOF'
@@ -45,35 +66,27 @@ fs.file-max=131072
 EOF
 
 sudo sysctl --system
-```
-
-Check available storage:
-
-```bash
+sysctl vm.max_map_count
 df -h / /data
 ```
 
-## Repository layout
+## 1. Create persistent directories
 
-```text
-My-DevOps-Docs/
-├── docker-compose.yml
-├── .env                  # Local secret; do not commit
-├── .gitignore
-├── README.md
-├── AUTOMATION.md
-└── SECURITY.md
-```
-
-## 1. Create the host data directories
-
-The Compose file expects these directories to exist:
+Run from any directory:
 
 ```bash
+sudo mkdir -p /data/docker/jenkins
 sudo mkdir -p /data/docker/sonarqube/{postgres,sonarqube_data,extensions,logs,temp}
+sudo mkdir -p /data/docker/trivy/cache
 ```
 
-The directories must be writable by the users inside the relevant containers. The SonarQube Community image commonly runs as UID `1000`, GID `0`. Set ownership for its directories:
+Jenkins commonly runs as UID/GID `1000:1000` in the configured image:
+
+```bash
+sudo chown -R 1000:1000 /data/docker/jenkins
+```
+
+The SonarQube image commonly runs as UID `1000`, GID `0`. If the directories are new and empty, set ownership for the SonarQube application directories:
 
 ```bash
 sudo chown -R 1000:0 \
@@ -83,19 +96,11 @@ sudo chown -R 1000:0 \
   /data/docker/sonarqube/temp
 ```
 
-Do not guess the PostgreSQL UID/GID. Check the runtime user and directory permissions before changing ownership:
+Do not blindly change ownership of an existing PostgreSQL data directory. Check the database logs, runtime user, and permissions first. Do not recursively change database ownership while PostgreSQL is running.
 
-```bash
-docker compose up -d db
-docker compose exec db id
-docker compose exec db sh -c 'id postgres; ls -ld /var/lib/postgresql/data'
-```
+## 2. Configure the environment
 
-If PostgreSQL fails before `exec` is available, inspect its logs and the official image's expected ownership. Do not recursively change ownership of the database directory while PostgreSQL is running.
-
-## 2. Configure the database password
-
-Create a local `.env` file in the same directory as `docker-compose.yml`:
+From the repository directory:
 
 ```bash
 cd ~/DevOps/My-DevOps-Docs
@@ -108,13 +113,13 @@ Add a strong, unique password:
 SONAR_DB_PASSWORD=replace_with_a_strong_unique_password
 ```
 
-Restrict permissions:
+Restrict access:
 
 ```bash
 chmod 600 .env
 ```
 
-Make sure `.env` is ignored by Git. Add this to `.gitignore` if it is not already present:
+Ensure `.env` is ignored by Git. Recommended `.gitignore` entries:
 
 ```gitignore
 .env
@@ -122,199 +127,257 @@ Make sure `.env` is ignored by Git. Add this to `.gitignore` if it is not alread
 !.env.example
 ```
 
-Never commit real database passwords, SonarQube tokens, or other credentials.
+Never commit passwords, Jenkins tokens, SonarQube tokens, or scan credentials.
 
-## 3. Validate and start
+## 3. Validate and start the stack
 
-From the directory containing `docker-compose.yml`:
+From `~/DevOps/My-DevOps-Docs`:
 
 ```bash
 docker compose config -q
 docker compose pull
 docker compose up -d
-```
-
-Check service status:
-
-```bash
 docker compose ps
 ```
 
 Follow logs:
 
 ```bash
-docker compose logs -f db
 docker compose logs -f sonarqube
+docker compose logs -f db
+docker compose logs -f jenkins
 ```
 
-The first startup can take several minutes. Wait for SonarQube to finish initialization before opening the UI.
+Use `Ctrl+C` to stop following logs; this does not stop the containers.
 
-## 4. Access SonarQube
+## 4. Complete first-time setup
 
-Open:
+### Jenkins
 
-[http://localhost:9000](http://localhost:9000)
+Open http://localhost:8080.
 
-The Compose configuration binds port `9000` to `127.0.0.1`, so the web UI is accessible only from the host by default. If remote access is required, prefer a secured reverse proxy and firewall rules rather than exposing the service publicly without protection.
-
-On a fresh SonarQube instance, the initial credentials are typically:
-
-- Username: `admin`
-- Password: `admin`
-
-Change the password when prompted. If this is not a fresh instance, use the credentials already configured for that instance.
-
-## 5. Verify persistent storage
-
-Inspect the host-to-container mounts:
+Retrieve the initial administrator password:
 
 ```bash
-docker inspect sonarqube-db \
+sudo cat /data/docker/jenkins/secrets/initialAdminPassword
+```
+
+Install suggested plugins and create an administrator account. Change the initial password when prompted.
+
+### SonarQube
+
+Open http://localhost:9000. On a fresh instance, the initial credentials are commonly `admin` / `admin`; change the password when prompted.
+
+SonarQube's database is PostgreSQL. The embedded database warning should not appear for a correctly configured new instance using PostgreSQL. This setup does not automatically migrate any data from an earlier embedded-database instance.
+
+## 5. Use Trivy
+
+The Compose file should define Trivy with an on-demand profile similar to:
+
+```yaml
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: trivy-scanner
+    profiles:
+      - tools
+    entrypoint: ["trivy"]
+    volumes:
+      - ./:/workspace:ro
+      - /data/docker/trivy/cache:/root/.cache/
+    networks:
+      - devSecOps_network
+```
+
+Pull the image and check its version:
+
+```bash
+docker compose pull trivy
+docker compose run --rm trivy --version
+```
+
+Run these commands from `~/DevOps/My-DevOps-Docs`. The repository directory is mounted read-only at `/workspace`.
+
+### Scan the repository filesystem
+
+```bash
+docker compose run --rm trivy fs \
+  --scanners vuln,misconfig,secret /workspace
+```
+
+### Scan a container image
+
+For a local image that Trivy can access, the simplest approach is to use the Docker daemon socket. This gives the scanner powerful access to the host Docker daemon, so only do this when needed:
+
+```bash
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /data/docker/trivy/cache:/root/.cache/ \
+  aquasec/trivy:latest image nginx:latest
+```
+
+### Save a scan report
+
+```bash
+mkdir -p reports
+
+docker compose run --rm trivy fs \
+  --scanners vuln,misconfig,secret \
+  --format json \
+  --output /workspace/reports/trivy-fs-report.json \
+  /workspace
+```
+
+The repository mount is read-only in the example Compose configuration, so this command cannot write the report to `/workspace/reports`. To save reports, either use a separate writable reports mount in the Compose service or use a one-off command with an explicit host directory mounted read-write. For example:
+
+```bash
+mkdir -p reports
+docker run --rm \
+  -v "$PWD:/workspace:ro" \
+  -v "$PWD/reports:/reports" \
+  -v /data/docker/trivy/cache:/root/.cache/ \
+  aquasec/trivy:latest fs \
+  --scanners vuln,misconfig,secret \
+  --format json \
+  --output /reports/trivy-fs-report.json \
+  /workspace
+```
+
+Review reports before sharing them; secret scans can identify sensitive content.
+
+## Useful Docker Compose commands
+
+Run from the directory containing `docker-compose.yml`.
+
+| Task | Command |
+|---|---|
+| Validate configuration | `docker compose config -q` |
+| Start all services | `docker compose up -d` |
+| Stop services without removing containers | `docker compose stop` |
+| Start stopped services | `docker compose start` |
+| Restart all services | `docker compose restart` |
+| Restart Jenkins | `docker compose restart jenkins` |
+| Restart SonarQube | `docker compose restart sonarqube` |
+| Show service status | `docker compose ps` |
+| Follow all logs | `docker compose logs -f` |
+| Show recent logs | `docker compose logs --tail=100` |
+| Pull newer configured images | `docker compose pull` |
+| Recreate after image updates | `docker compose up -d` |
+| Run Trivy version | `docker compose run --rm trivy --version` |
+| Stop and remove containers/network | `docker compose down` |
+
+**Avoid `docker compose down -v` unless you intentionally want to delete Compose-managed volumes.** The current storage configuration uses host bind mounts for persistent data, but always verify mounts and backups before destructive operations.
+
+## Useful diagnostics
+
+### Check containers
+
+```bash
+docker compose ps -a
+docker ps -a
+```
+
+### Check disk usage
+
+```bash
+df -h / /data
+sudo du -sh /data/docker/*
+sudo du -sh /data/docker/sonarqube/*
+```
+
+### Verify storage mounts
+
+```bash
+docker inspect jenkins-server \
   --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 
 docker inspect sonarqube-server \
   --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+
+docker inspect sonarqube-db \
+  --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 ```
 
-Expected database mapping:
-
-```text
-/data/docker/sonarqube/postgres -> /var/lib/postgresql/data
-```
-
-Expected SonarQube mappings:
-
-```text
-/data/docker/sonarqube/sonarqube_data -> /opt/sonarqube/data
-/data/docker/sonarqube/extensions -> /opt/sonarqube/extensions
-/data/docker/sonarqube/logs -> /opt/sonarqube/logs
-/data/docker/sonarqube/temp -> /opt/sonarqube/temp
-```
-
-Check disk usage:
+### Check PostgreSQL readiness
 
 ```bash
-sudo du -sh /data/docker/sonarqube/*
-df -h /data
+docker exec sonarqube-db pg_isready -U sonar -d sonar
 ```
 
-## Common commands
+### Check listening ports
 
-Run these commands from the directory containing `docker-compose.yml`.
+```bash
+sudo ss -ltnp | grep -E ':(8080|9000)\b'
+```
 
-| Task | Command |
-|---|---|
-| Start services | `docker compose up -d` |
-| Stop services | `docker compose stop` |
-| Start stopped services | `docker compose start` |
-| Restart services | `docker compose restart` |
-| Restart SonarQube only | `docker compose restart sonarqube` |
-| View status | `docker compose ps` |
-| Follow all logs | `docker compose logs -f` |
-| View recent logs | `docker compose logs --tail=100` |
-| Pull configured images | `docker compose pull` |
-| Validate Compose file | `docker compose config -q` |
-| Stop and remove containers/network | `docker compose down` |
+### Check Docker networks
 
-`docker compose down` does not remove host data in the configured bind-mounted directories.
+```bash
+docker network ls
+docker network inspect devSecOps_network
+```
 
-**Avoid `docker compose down -v` unless you intentionally want to remove Compose-managed volumes.** Although the intended data paths are bind mounts, deleting volumes can still remove volume-managed data or make recovery harder if the configuration changed. Always verify mounts and back up data before destructive operations.
+## Jenkins-to-SonarQube integration
+
+Because Jenkins and SonarQube share the `devSecOps_network` network, configure the SonarQube server URL in Jenkins as:
+
+```text
+http://sonarqube-server:9000
+```
+
+Create a SonarQube token in SonarQube and store it in Jenkins Credentials. Do not put the token directly in a Jenkinsfile or repository. Install the SonarQube Scanner for Jenkins plugin and configure the server connection in **Manage Jenkins → System**.
+
+The Compose setup does not automatically install Docker CLI, Trivy inside Jenkins, build tools, or pipeline plugins. Add only the build tooling needed by your pipelines. Avoid mounting `/var/run/docker.sock` into Jenkins unless you understand that it grants highly privileged control over the host Docker daemon.
 
 ## Backups
 
-Back up both the PostgreSQL database and the SonarQube data/configuration before upgrades or significant changes. A filesystem copy of a live PostgreSQL data directory is not a reliable database backup by itself.
-
-Example logical database backup:
+Back up PostgreSQL with a logical dump:
 
 ```bash
-mkdir -p ~/sonarqube-backups
-docker compose exec -T db pg_dump -U sonar -d sonar \
-  > ~/sonarqube-backups/sonar-$(date +%F-%H%M%S).sql
+mkdir -p ~/devsecops-backups
+
+docker exec sonarqube-db \
+  pg_dump -U sonar -d sonar \
+  > ~/devsecops-backups/sonar-$(date +%F-%H%M%S).sql
 ```
 
-Verify the dump file exists and is non-empty:
+Check that the backup is non-empty:
 
 ```bash
-ls -lh ~/sonarqube-backups/
+ls -lh ~/devsecops-backups/
 ```
 
-Protect backup files because they may contain sensitive project and account metadata. Store copies on a separate disk or backup destination. Test restoration periodically.
-
-For a consistent recovery plan, also back up the SonarQube data and extensions directories while the service is stopped, or follow the backup procedure recommended for your SonarQube version.
-
-## Upgrades
-
-Do not use `latest` for a controlled environment. Pin a tested SonarQube image version in `docker-compose.yml`, read its upgrade notes, and verify database compatibility before upgrading.
-
-Before upgrading:
-
-1. Create and verify a PostgreSQL backup.
-2. Back up the SonarQube data and extensions as appropriate.
-3. Review the version-specific upgrade path and requirements.
-4. Pull the chosen image version and upgrade during a maintenance window.
-5. Check logs, sign in, and run a test analysis.
-
-Do not assume that downgrading the container image will safely downgrade the database schema.
-
-## Troubleshooting
-
-### SonarQube does not start
+For Jenkins, stop Jenkins before making a filesystem-level copy of its home directory to avoid an inconsistent backup:
 
 ```bash
+docker compose stop jenkins
+sudo tar -czf ~/devsecops-backups/jenkins-home-$(date +%F-%H%M%S).tar.gz \
+  -C /data/docker jenkins
+docker compose start jenkins
+```
+
+Back up to a separate disk or backup destination as well. A backup on the same disk does not protect against disk failure. Test restoration periodically.
+
+## Updating images
+
+Review release notes and compatibility requirements before upgrades. The `latest` tags can move forward and may introduce breaking changes. For controlled environments, pin tested versions and upgrade during a maintenance window.
+
+```bash
+docker compose pull
+docker compose up -d
 docker compose ps
-docker compose logs --tail=200 sonarqube
-docker compose logs --tail=200 db
+docker compose logs --tail=100
 ```
 
-Confirm that PostgreSQL is healthy and the database password matches in the `.env` file.
-
-### PostgreSQL permission errors
-
-```bash
-docker compose logs --tail=200 db
-ls -ld /data/docker/sonarqube/postgres
-```
-
-Check the actual runtime user and required directory ownership. Avoid guessing numeric UIDs or changing ownership while the database is running.
-
-### SonarQube reports Elasticsearch bootstrap or kernel errors
-
-Confirm the host setting:
-
-```bash
-sysctl vm.max_map_count
-```
-
-It should report `524288` or a higher supported value. Apply the host configuration from the prerequisites section if needed.
-
-### Port 9000 is already in use
-
-```bash
-sudo ss -ltnp | grep ':9000'
-```
-
-Stop the conflicting service or change the host-side port mapping in Compose. For example, `"127.0.0.1:9001:9000"` would expose the UI locally on port `9001`.
-
-### Environment variable is missing
-
-```bash
-docker compose config
-```
-
-Confirm `.env` is in the same directory as `docker-compose.yml` and contains `SONAR_DB_PASSWORD`. Do not paste the secret into issue trackers or public logs.
+Back up Jenkins and PostgreSQL before upgrading. Do not assume that downgrading an image will safely downgrade persistent data or database schemas.
 
 ## Security notes
 
-- Keep `.env` out of version control.
-- Change the default SonarQube administrator password.
-- Do not expose PostgreSQL's port publicly; it is intentionally not published to the host.
-- Keep Docker images and the host OS updated using a planned maintenance process.
-- Use least privilege for tokens and rotate credentials when necessary.
-- Restrict access to backups and persistent data directories.
-- For remote use, configure TLS and appropriate authentication through a secured reverse proxy.
-
-## Important notes
-
-- This configuration is intended for a persistent development/DevSecOps environment, not a complete high-availability production architecture.
-- PostgreSQL persistence does not automatically migrate data from SonarQube's embedded database. A newly configured PostgreSQL instance starts as a separate instance unless a supported migration is performed.
-- Data is intended to live under `/data/docker/sonarqube`. Verify the actual mounts with `docker inspect` before assuming storage is configured correctly.
+- Keep the `.env` file out of Git.
+- Change default administrator credentials.
+- Do not publish the PostgreSQL port.
+- Keep Jenkins and SonarQube bound to localhost unless remote access is intentionally secured.
+- Use least-privilege credentials and rotate tokens when needed.
+- Treat Docker socket access as highly privileged.
+- Restrict access to backups, logs, and scan reports.
+- Scan reports can contain sensitive file paths and secret findings.
+- Avoid using this local stack as a high-availability production deployment without additional hardening, monitoring, and tested backup/restore procedures.
