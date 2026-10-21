@@ -1,0 +1,12 @@
+FROM jenkins/jenkins:latest-jdk21
+
+USER root
+
+# Install Trivy v0.76.0
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+    | sh -s -- -b /usr/local/bin v0.76.0
+
+# Verify installation
+RUN trivy --version
+
+USER jenkins
