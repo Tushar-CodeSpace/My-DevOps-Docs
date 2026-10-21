@@ -51,6 +51,7 @@ services:
     user: "1000:1000"
     environment:
       TZ: Asia/Kolkata
+      JAVA_OPTS: "-Xms128m -Xmx512m"
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
