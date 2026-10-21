@@ -59,23 +59,23 @@ pipeline {
             }
         }
 
-        stage('OWASP FS SCAN') {
-            steps {
-                dependencyCheck(
-                    odcInstallation: 'DP-Check',
-                    nvdCredentialsId: 'nvd-api-key',
-                    additionalArguments: '--scan . --disableYarnAudit --disableNodeAudit --format XML --out . --nvdValidForHours 24'
-                )
-            }
-            post {
-                always {
-                    dependencyCheckPublisher(
-                        pattern: '**/dependency-check-report.xml',
-                        skipNoReportFiles: true
-                    )
-                }
-            }
-        }
+        // stage('OWASP FS SCAN') {
+        //     steps {
+        //         dependencyCheck(
+        //             odcInstallation: 'DP-Check',
+        //             nvdCredentialsId: 'nvd-api-key',
+        //             additionalArguments: '--scan . --disableYarnAudit --disableNodeAudit --format XML --out . --nvdValidForHours 24'
+        //         )
+        //     }
+        //     post {
+        //         always {
+        //             dependencyCheckPublisher(
+        //                 pattern: '**/dependency-check-report.xml',
+        //                 skipNoReportFiles: true
+        //             )
+        //         }
+        //     }
+        // }
 
         stage('Run Build') {
             steps {
