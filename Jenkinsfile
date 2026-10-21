@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -21,7 +20,7 @@ pipeline {
             steps {
                 git branch: 'master',
                     credentialsId: 'github-pat',
-                    url: 'https://github.com/<ORG>/<REPO>.git'
+                    url: 'https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git'
             }
         }
 
@@ -30,8 +29,8 @@ pipeline {
                 withSonarQubeEnv('sonarqube-server') {
                     sh '''
                         "$SCANNER_HOME/bin/sonar-scanner" \
-                          -Dsonar.projectName=<Project Name> \
-                          -Dsonar.projectKey=<Project Key>
+                          -Dsonar.projectName=nidoworkz-backend \
+                          -Dsonar.projectKey=nidoworkz-backend
                     '''
                 }
             }
@@ -49,10 +48,28 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Install Dependencies') {
             steps {
                 sh 'npm ci'
+            }
+        }
+
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck(
+                    odcInstallation: 'DP-Check',
+                    nvdCredentialsId: 'nvd-api-key',
+                    additionalArguments: '--scan . --disableYarnAudit --disableNodeAudit --format XML --out . --nvdValidForHours 24'
+                )
+            }
+            post {
+                always {
+                    dependencyCheckPublisher(
+                        pattern: '**/dependency-check-report.xml',
+                        skipNoReportFiles: true
+                    )
+                }
             }
         }
 
