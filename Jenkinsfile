@@ -77,6 +77,24 @@ pipeline {
         //     }
         // }
 
+        stage('TRIVY FS SCAN') {
+           steps {
+                sh '''
+                    docker run --rm \
+                        -v "$WORKSPACE:/workspace:ro" \
+                        -v /data/docker/trivy/cache:/root/.cache/ \
+                        aquasec/trivy:0.76.1 \
+                        fs /workspace > trivyfs.txt
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivyfs.txt',
+                                     allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Run Build') {
             steps {
                 sh 'npm run build'
