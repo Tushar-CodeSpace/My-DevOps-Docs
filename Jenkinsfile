@@ -54,17 +54,17 @@ pipeline {
             }
         }
 
-        stage('Quality Gate') {
+        stage('SonarQube Quality Gate') {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     script {
                         def qg = waitForQualityGate()
-                        env.QUALITY_GATE_STATUS = qg.status
+                        env.QUALITY_GATE_STATUS = qg.status ?: 'UNKNOWN'
 
                         echo "SonarQube Quality Gate: ${env.QUALITY_GATE_STATUS}"
 
-                        if (qg.status != 'OK') {
-                            error "Quality Gate failed: ${qg.status}"
+                        if (env.QUALITY_GATE_STATUS != 'OK') {
+                            error "SonarQube Quality Gate failed: ${env.QUALITY_GATE_STATUS}"
                         }
                     }
                 }
