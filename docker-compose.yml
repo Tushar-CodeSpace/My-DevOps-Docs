@@ -49,6 +49,8 @@ services:
     container_name: jenkins-server
     restart: unless-stopped
     user: "1000:1000"
+    environment:
+      TZ: Asia/Kolkata
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
