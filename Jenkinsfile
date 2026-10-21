@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -20,13 +21,7 @@ pipeline {
             steps {
                 git branch: 'master',
                     credentialsId: 'github-pat',
-                    url: 'https://github.com/<org>/<repo>.git'
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh 'npm install'
+                    url: 'https://github.com/<ORG>/<REPO>.git'
             }
         }
 
@@ -35,8 +30,8 @@ pipeline {
                 withSonarQubeEnv('sonarqube-server') {
                     sh '''
                         "$SCANNER_HOME/bin/sonar-scanner" \
-                          -Dsonar.projectName=<sonar-project-name> \
-                          -Dsonar.projectKey=<sonar-project-key>
+                          -Dsonar.projectName=<Project Name> \
+                          -Dsonar.projectKey=<Project Key>
                     '''
                 }
             }
@@ -54,11 +49,23 @@ pipeline {
                 }
             }
         }
-    }
+        
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm ci'
+            }
+        }
 
-    post {
-        always {
-            cleanWs()
+        stage('Run Build') {
+            steps {
+                sh 'npm run build'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'npm run test'
+            }
         }
     }
 }
